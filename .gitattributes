@@ -1,0 +1,5 @@
+# Keep LF everywhere so shell scripts, Dockerfiles and YAML work on any OS.
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.pdf binary
