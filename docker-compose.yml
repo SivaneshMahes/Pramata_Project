@@ -1,0 +1,81 @@
+# Local stack: web (nginx) + api (Express) + mongodb (single-node replica set,
+# required for transactions) + storage (S3-compatible photo storage).
+#
+#   docker compose up --build        then open http://localhost:8080
+#   docker compose run --rm -e NODE_ENV=development api node apps/api/dist/scripts/seed.js
+
+name: vehicle-rental
+
+services:
+  mongo:
+    image: mongo:7
+    command: ['--replSet', 'rs0', '--bind_ip_all']
+    ports: ['27017:27017']
+    volumes: ['mongo-data:/data/db']
+    healthcheck:
+      # Initiates the replica set on first boot, then reports healthy.
+      test: >
+        mongosh --quiet --eval "try { rs.status().ok } catch (e) { rs.initiate({ _id: 'rs0', members: [{ _id: 0, host: 'mongo:27017' }] }).ok }"
+      interval: 5s
+      timeout: 10s
+      retries: 20
+      start_period: 5s
+
+  # S3-compatible object storage for vehicle photos (stands in for Amazon S3).
+  # With no identities configured it accepts any credentials and serves
+  # objects publicly, which mirrors "presigned PUT + public CDN GET".
+  storage:
+    image: chrislusf/seaweedfs:latest
+    command: ['server', '-dir=/data', '-s3', '-s3.port=9000', '-s3.allowedOrigins=http://localhost:8080,http://localhost:5173']
+    ports: ['9000:9000']
+    volumes: ['storage-data:/data']
+    healthcheck:
+      test: ['CMD-SHELL', 'wget -qO- http://127.0.0.1:9000/healthz >/dev/null 2>&1 || wget -qO- http://127.0.0.1:9000/ >/dev/null 2>&1']
+      interval: 5s
+      retries: 30
+      start_period: 5s
+
+  storage-setup:
+    image: curlimages/curl:latest
+    depends_on:
+      storage: { condition: service_healthy }
+    command: ['-fsS', '-X', 'PUT', 'http://storage:9000/vehicle-images']
+    restart: 'no'
+
+  api:
+    build:
+      context: .
+      dockerfile: apps/api/Dockerfile
+    environment:
+      NODE_ENV: production
+      PORT: 4000
+      LOG_LEVEL: info
+      MONGODB_URI: mongodb://mongo:27017/vehicle_rental?replicaSet=rs0
+      JWT_SECRET: ${JWT_SECRET:-local-only-secret-change-me-0123456789abcdef}
+      COOKIE_SECURE: 'false'
+      TRUST_PROXY: '1'
+      CORS_ORIGINS: http://localhost:8080
+      ENABLE_JOBS: 'true'
+      # Presigning is pure computation; the browser uploads to localhost:9000.
+      S3_BUCKET: vehicle-images
+      S3_REGION: us-east-1
+      S3_ENDPOINT: http://localhost:9000
+      S3_PUBLIC_BASE_URL: http://localhost:9000/vehicle-images
+      AWS_ACCESS_KEY_ID: local
+      AWS_SECRET_ACCESS_KEY: local-secret
+    ports: ['4000:4000']
+    depends_on:
+      mongo: { condition: service_healthy }
+      storage: { condition: service_healthy }
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    ports: ['8080:8080']
+    depends_on:
+      api: { condition: service_healthy }
+
+volumes:
+  mongo-data:
+  storage-data:

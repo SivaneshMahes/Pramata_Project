@@ -1,0 +1,10 @@
+region            = "ap-south-1"
+hosted_zone_name  = "example.com"
+app_domain        = "rentals.example.com"
+github_repository = "your-org/vehicle-rental-platform"
+alarm_emails      = ["oncall@example.com"]
+
+# Dedicated Atlas tier with continuous backups and compute auto-scaling.
+# atlas_project_id    = "64f0c0ffee0123456789abcd"
+# atlas_region        = "AP_SOUTH_1"
+# atlas_instance_size = "M10"
